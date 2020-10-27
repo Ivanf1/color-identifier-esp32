@@ -6,6 +6,8 @@
 #include <secrets.h>
 
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
+const int colorSensorLedPin = 26;
+boolean isColorSensorOn;
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/color");
@@ -14,13 +16,13 @@ void readColorSensor(char * hex) {
   float red, green, blue;
 
   tcs.getRGB(&red, &green, &blue);
-  Serial.print("R: "); Serial.print(int(red));
-  Serial.print("\tG: "); Serial.print(int(green));
-  Serial.print("\tB: "); Serial.print(int(blue));
+  // Serial.print("R: "); Serial.print(int(red));
+  // Serial.print("\tG: "); Serial.print(int(green));
+  // Serial.print("\tB: "); Serial.print(int(blue));
 
-  Serial.print("\tHEX: ");
-  Serial.print((int)red, HEX); Serial.print((int)green, HEX); Serial.print((int)blue, HEX);
-  Serial.println();
+  // Serial.print("\tHEX: ");
+  // Serial.print((int)red, HEX); Serial.print((int)green, HEX); Serial.print((int)blue, HEX);
+  // Serial.println();
 
   char r[12], g[12], b[12];
   sprintf(r, "%x", (int)red);
@@ -31,12 +33,14 @@ void readColorSensor(char * hex) {
   strcat(hex, b);
 }
 
+void toggleColorSensor() {
+  isColorSensorOn ? tcs.disable() : tcs.enable();
+  isColorSensorOn = !isColorSensorOn;
+  digitalWrite(colorSensorLedPin, isColorSensorOn);
+}
+
 void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
-  if(type == WS_EVT_CONNECT) {
-    Serial.println("Websocket client connection received");
-  } else if(type == WS_EVT_DISCONNECT) {
-    Serial.println("Client disconnected");
-  } else if(type == WS_EVT_DATA) {
+  if(type == WS_EVT_DATA) {
     //data packet
     AwsFrameInfo * info = (AwsFrameInfo*)arg;
     if(info->final && info->index == 0 && info->len == len) {
@@ -48,9 +52,15 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
           readColorSensor(hex);
           client->text((char *)hex);
         }
-        Serial.printf("Message from client: %s\n", (char*)data);
+        // Serial.printf("Message from client: %s\n", (char*)data);
       }
     }
+  } else if(type == WS_EVT_CONNECT) {
+    Serial.println("Websocket client connection received");
+    toggleColorSensor();
+  } else if(type == WS_EVT_DISCONNECT) {
+    Serial.println("Client disconnected");
+    toggleColorSensor();
   }
 }
 
@@ -59,9 +69,13 @@ void setup(void) {
 
   // Color sensor setup ------
   if (tcs.begin()) {
+    pinMode(colorSensorLedPin, OUTPUT);
     Serial.println("Found sensor");
+    tcs.disable();
+    isColorSensorOn = false;
+    digitalWrite(colorSensorLedPin, isColorSensorOn);
   } else {
-    Serial.println("No TCS34725 found ... check your connections");
+    Serial.println("No TCS34725 found");
     return;
   }
   // -------------------------
@@ -74,7 +88,7 @@ void setup(void) {
     Serial.printf("WiFi Failed!\n");
     return;
   } else {
-    Serial.println("wifi connected\n");
+    Serial.println("WiFi connected\n");
   }
 
   ws.onEvent(onWsEvent);
