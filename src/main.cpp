@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <WiFi.h>
 #include <Adafruit_TCS34725.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -6,10 +7,12 @@
 
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
 const int colorSensorLedPin = 26;
-boolean isColorSensorOn;
+boolean isColorSensorOn = false;
 
+uint32_t clientID = 0;
+boolean doStream = false;
 AsyncWebServer server(80);
-AsyncWebSocket ws("/color");
+AsyncWebSocket ws("/colorStream");
 
 void readColorSensor(char * hex) {
   float red, green, blue;
@@ -32,10 +35,10 @@ void readColorSensor(char * hex) {
   strcat(hex, b);
 }
 
-void toggleColorSensor() {
-  isColorSensorOn ? tcs.disable() : tcs.enable();
-  isColorSensorOn = !isColorSensorOn;
-  digitalWrite(colorSensorLedPin, isColorSensorOn);
+void toggleColorSensor(boolean enable) {
+  enable ? tcs.enable() : tcs.disable();
+  isColorSensorOn = enable;
+  digitalWrite(colorSensorLedPin, enable);
 }
 
 void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
@@ -43,23 +46,25 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
     //data packet
     AwsFrameInfo * info = (AwsFrameInfo*)arg;
     if(info->final && info->index == 0 && info->len == len) {
-      //the whole message is in a single frame and we got all of it's data
+      //the whole message is in a single frame and we got all of its data
       if(info->opcode == WS_TEXT) {
         data[len] = 0;
-        if(strcmp((char *)data, "getSensorColor") == 0) {
-          char hex[36];
-          readColorSensor(hex);
-          client->text((char *)hex);
+        if(strcmp((char *)data, "startColorStream") == 0) {
+          toggleColorSensor(true);
+          clientID = client->id();
+          doStream = true;
+        } else if(strcmp((char *)data, "stopColorStream") == 0) {
+          toggleColorSensor(false);
+          doStream = false;
         }
-        // Serial.printf("Message from client: %s\n", (char*)data);
       }
     }
   } else if(type == WS_EVT_CONNECT) {
     Serial.println("Websocket client connection received");
-    toggleColorSensor();
   } else if(type == WS_EVT_DISCONNECT) {
+    clientID = 0;
+    doStream = false;
     Serial.println("Client disconnected");
-    toggleColorSensor();
   }
 }
 
@@ -70,9 +75,7 @@ void setup(void) {
   if (tcs.begin()) {
     pinMode(colorSensorLedPin, OUTPUT);
     Serial.println("Found sensor");
-    tcs.disable();
-    isColorSensorOn = false;
-    digitalWrite(colorSensorLedPin, isColorSensorOn);
+    toggleColorSensor(false);
   } else {
     Serial.println("No TCS34725 found");
     return;
@@ -89,13 +92,39 @@ void setup(void) {
   } else {
     Serial.println("WiFi connected\n");
   }
+  Serial.println(WiFi.localIP());
 
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
-  Serial.println(WiFi.localIP());
+  server.on("/", [](AsyncWebServerRequest *request) {
+    AsyncWebServerResponse *response = new AsyncWebServerResponse();
+    if(!doStream) {
+      if(!isColorSensorOn) toggleColorSensor(true);
+      char hex[36];
+      readColorSensor(hex);
+      response = request->beginResponse(200, "text/plain", (char *)hex);
+      toggleColorSensor(false);
+    } else {
+      response = request->beginResponse(503, "text/plain", "busy");
+    }
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+    return;
+  });
+
   server.begin();
   // -------------------------
 }
 
-void loop(void) {}
+void loop(void) {
+  if(clientID != 0 && doStream) {
+    try {
+      char hex[36];
+      readColorSensor(hex);
+      if(clientID != 0 && doStream) ws.client(clientID)->text((char *)hex);
+    } catch(...) {
+      Serial.println("error when sendig to ws client");
+    }
+  }
+}
