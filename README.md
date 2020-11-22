@@ -23,5 +23,6 @@ The color sensor is a TCS34725. It uses the I2C Communication Protocol so it jus
 ### Todo list
 
 - Better reading speed from the color sensor
+- Better tuning for accuracy improvement
 
 [1]: https://github.com/Ivanf1/color-identifier
