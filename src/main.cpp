@@ -3,7 +3,7 @@
 #include <Adafruit_TCS34725.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include <secrets.h>
+#include "secrets.h"
 
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
 const int colorSensorLedPin = 26;
